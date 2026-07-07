@@ -48,7 +48,7 @@
     }
     .banner .loc { font-size: 18px; font-weight: 700; }
     .banner .store { font-size: 12px; opacity: .75; margin-top: 2px; }
-    .logo { flex: none; height: 40px; width: auto; max-width: 42%; object-fit: contain; }
+    .logo { flex: none; height: 52px; width: auto; max-width: 46%; object-fit: contain; }
 
     .footer {
       max-width: 640px; margin: 40px auto 0; padding: 16px;
@@ -150,7 +150,7 @@
     <div id="results"></div>
   </div>
 
-  <footer class="footer">© <span id="year"></span> Ataberk Yanut @Mavi Jeans · Internal use only</footer>
+  <footer class="footer">© <span id="year"></span> Mavi · Internal use only</footer>
 
   <script>
     const els = {
@@ -294,6 +294,18 @@
         const res = await fetch("/api/config");
         if (res.status === 401) { window.location = "/login"; return; }
         const cfg = await res.json();
+
+        // When a password is set, sign out on refresh: a fresh login lands on
+        // "/?k=1"; a reload has no "k", so we treat it as a sign-out.
+        if (cfg.sessionTimeoutMinutes > 0) {
+          if (!new URL(window.location.href).searchParams.has("k")) {
+            window.location = "/logout";
+            return;
+          }
+          history.replaceState({}, "", window.location.pathname); // hide the marker
+          startIdleTimer(cfg.sessionTimeoutMinutes);
+        }
+
         if (!cfg.configured) {
           els.loc.textContent = "Not configured";
           setStatus(cfg.error || "App is not configured.", true);
@@ -302,7 +314,6 @@
         }
         els.loc.textContent = cfg.location || "Selected location";
         els.store.textContent = cfg.store || "";
-        if (cfg.sessionTimeoutMinutes > 0) startIdleTimer(cfg.sessionTimeoutMinutes);
       } catch {
         els.loc.textContent = "Selected location";
       }
