@@ -1,5 +1,6 @@
 import express from "express";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,11 @@ const RAW_LOCATION_ID = process.env.SHOPIFY_LOCATION_ID || "";
 const API_VERSION = process.env.SHOPIFY_API_VERSION || "2025-01";
 // Optional: if set, the whole app is protected behind this shared password.
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
+// Idle timeout in minutes before the session expires (only used with APP_PASSWORD).
+const SESSION_MINUTES = (() => {
+  const n = parseInt(process.env.SESSION_TIMEOUT_MINUTES || "5", 10);
+  return Number.isFinite(n) && n > 0 ? n : 5;
+})();
 
 // Normalize "mystore", "mystore.myshopify.com" or a full URL into a hostname.
 function shopHost(raw) {
@@ -43,18 +49,99 @@ function configError() {
   return missing.length ? `Missing environment variables: ${missing.join(", ")}` : null;
 }
 
-// ---- Optional shared-password gate -----------------------------------------
+// ---- Optional shared-password gate (cookie session, idle timeout) ----------
+
+function signValue(value) {
+  return crypto.createHmac("sha256", APP_PASSWORD).update(value).digest("hex");
+}
+function makeToken() {
+  const exp = String(Date.now() + SESSION_MINUTES * 60 * 1000);
+  return `${exp}.${signValue(exp)}`;
+}
+function tokenValid(token) {
+  if (!token || !token.includes(".")) return false;
+  const [exp, sig] = token.split(".");
+  const expected = signValue(exp);
+  if (!sig || sig.length !== expected.length) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  return Number(exp) > Date.now();
+}
+function readCookie(req, name) {
+  const raw = req.headers.cookie || "";
+  for (const part of raw.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) return decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return null;
+}
+function setSessionCookie(req, res) {
+  const secure = (req.headers["x-forwarded-proto"] || req.protocol) === "https";
+  const parts = [
+    `ssid=${makeToken()}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${SESSION_MINUTES * 60}`,
+  ];
+  if (secure) parts.push("Secure");
+  res.append("Set-Cookie", parts.join("; "));
+}
+function loginPage(showError) {
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign in — Stock Search</title>
+<style>
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#eef0f4;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14181f}
+  form{background:#fff;padding:28px 24px;border-radius:16px;box-shadow:0 8px 24px rgba(20,24,31,.08);
+    width:min(340px,90vw)}
+  h1{font-size:18px;margin:0 0 4px}
+  p{margin:0 0 18px;color:#5b6472;font-size:14px}
+  input{width:100%;box-sizing:border-box;font-size:16px;padding:13px;border:1px solid #dfe3ea;
+    border-radius:11px;margin-bottom:12px}
+  input:focus{outline:2px solid #1b4db1;border-color:transparent}
+  button{width:100%;border:0;background:#1b4db1;color:#fff;font-size:16px;font-weight:600;
+    padding:13px;border-radius:11px;cursor:pointer}
+  .err{color:#b42318;font-size:13px;margin:-4px 0 12px}
+</style></head><body>
+<form method="POST" action="/login">
+  <h1>Warehouse Stock Search</h1>
+  <p>Enter the access password to continue.</p>
+  ${showError ? '<div class="err">Incorrect password. Try again.</div>' : ""}
+  <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password" />
+  <button type="submit">Sign in</button>
+</form></body></html>`;
+}
 
 if (APP_PASSWORD) {
-  app.use((req, res, next) => {
-    const header = req.headers.authorization || "";
-    const [scheme, encoded] = header.split(" ");
-    if (scheme === "Basic" && encoded) {
-      const [, pass] = Buffer.from(encoded, "base64").toString().split(":");
-      if (pass === APP_PASSWORD) return next();
+  app.set("trust proxy", 1);
+  app.use(express.urlencoded({ extended: false }));
+
+  app.get("/login", (req, res) => {
+    res.type("html").send(loginPage(req.query.error === "1"));
+  });
+  app.post("/login", (req, res) => {
+    if ((req.body.password || "") === APP_PASSWORD) {
+      setSessionCookie(req, res);
+      return res.redirect("/");
     }
-    res.set("WWW-Authenticate", 'Basic realm="Stock Search"');
-    return res.status(401).send("Authentication required.");
+    return res.redirect("/login?error=1");
+  });
+  app.get("/logout", (req, res) => {
+    res.append("Set-Cookie", "ssid=; HttpOnly; Path=/; Max-Age=0");
+    res.redirect("/login");
+  });
+
+  app.use((req, res, next) => {
+    if (tokenValid(readCookie(req, "ssid"))) {
+      setSessionCookie(req, res); // sliding refresh on every request
+      return next();
+    }
+    if (req.path.startsWith("/api/")) {
+      return res.status(401).json({ error: "Session expired. Please sign in again.", auth: true });
+    }
+    return res.redirect("/login");
   });
 }
 
@@ -140,6 +227,7 @@ app.get("/api/config", async (req, res) => {
     error: err,
     store: SHOP_HOST || null,
     location: locationName,
+    sessionTimeoutMinutes: APP_PASSWORD ? SESSION_MINUTES : 0,
   });
 });
 
