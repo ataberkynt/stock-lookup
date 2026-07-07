@@ -117,7 +117,7 @@ function loginPage(showError) {
   <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password" />
   <button type="submit">Sign in</button>
 </form>
-<footer class="foot">© ${new Date().getFullYear()} Mavi · Internal use only</footer>
+<footer class="foot">© ${new Date().getFullYear()} Ataberk Yanut @Mavi Jeans · Internal use only</footer>
 </body></html>`;
 }
 
