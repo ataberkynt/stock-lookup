@@ -140,7 +140,11 @@ if (APP_PASSWORD) {
     res.redirect("/login");
   });
 
+  // Assets needed by the login page itself must bypass the auth gate.
+  const PUBLIC_ASSETS = new Set(["/logo.png", "/logo.svg", "/favicon.ico"]);
+
   app.use((req, res, next) => {
+    if (PUBLIC_ASSETS.has(req.path)) return next();
     if (tokenValid(readCookie(req, "ssid"))) {
       setSessionCookie(req, res); // sliding refresh on every request
       return next();
