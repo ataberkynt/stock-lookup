@@ -28,22 +28,33 @@
       -webkit-font-smoothing: antialiased;
       line-height: 1.4;
     }
-    .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 64px; }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 24px; }
 
-    /* Location banner — always visible so it's clear which stock is shown */
+    /* Location banner — full-bleed blue, content aligned to the column below */
     .banner {
       position: sticky; top: 0; z-index: 5;
-      margin: -16px -16px 16px;
-      padding: 14px 16px calc(14px + env(safe-area-inset-top));
-      background: var(--brand);
-      color: #fff;
+      background: var(--brand); color: #fff;
+      padding-top: env(safe-area-inset-top);
     }
+    .banner-inner {
+      max-width: 640px; margin: 0 auto;
+      padding: 14px 16px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .banner-text { flex: 1 1 auto; min-width: 0; }
     .banner .eyebrow {
       font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
       opacity: .8; margin-bottom: 2px;
     }
     .banner .loc { font-size: 18px; font-weight: 700; }
     .banner .store { font-size: 12px; opacity: .75; margin-top: 2px; }
+    .logo { flex: none; height: 40px; width: auto; max-width: 42%; object-fit: contain; }
+
+    .footer {
+      max-width: 640px; margin: 40px auto 0; padding: 16px;
+      text-align: center; color: var(--muted); font-size: 12px;
+      border-top: 1px solid var(--line);
+    }
 
     h1 { font-size: 20px; margin: 4px 0 14px; font-weight: 700; }
 
@@ -105,16 +116,22 @@
 
     /* Single-variant (barcode) result gets a bigger, focused readout */
     .focus .qty .num { font-size: 40px; }
-  </style>
+  </style>  <link rel="icon" href="/favicon.ico" />
 </head>
 <body>
-  <div class="wrap">
-    <div class="banner">
-      <div class="eyebrow">Showing stock for</div>
-      <div class="loc" id="locName">Loading…</div>
-      <div class="store" id="storeName"></div>
+  <header class="banner">
+    <div class="banner-inner">
+      <div class="banner-text">
+        <div class="eyebrow">Showing stock for</div>
+        <div class="loc" id="locName">Loading…</div>
+        <div class="store" id="storeName"></div>
+      </div>
+      <img class="logo" id="logo" src="/logo.png" alt="Mavi"
+           onerror="this.style.display='none'" />
     </div>
+  </header>
 
+  <div class="wrap">
     <h1>Warehouse Stock Search</h1>
 
     <div class="toggle" role="group" aria-label="Search type">
@@ -132,6 +149,8 @@
     <div id="status"></div>
     <div id="results"></div>
   </div>
+
+  <footer class="footer">© <span id="year"></span> Mavi · Internal use only</footer>
 
   <script>
     const els = {
@@ -243,6 +262,7 @@
           ? `/api/search?q=${encodeURIComponent(term)}`
           : `/api/barcode?code=${encodeURIComponent(term)}`;
         const res = await fetch(endpoint);
+        if (res.status === 401) { window.location = "/login"; return; }
         const data = await res.json();
         if (!res.ok) { setStatus(data.error || "Something went wrong.", true); return; }
         if (mode === "name") renderProducts(data.products || []);
@@ -257,10 +277,23 @@
     els.go.addEventListener("click", search);
     els.q.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
 
+    // Auto sign-out after a period of no interaction.
+    function startIdleTimer(minutes) {
+      const ms = minutes * 60 * 1000;
+      let t;
+      const reset = () => { clearTimeout(t); t = setTimeout(() => { window.location = "/logout"; }, ms); };
+      ["click", "keydown", "input", "touchstart", "mousemove"].forEach((ev) =>
+        document.addEventListener(ev, reset, { passive: true }));
+      reset();
+    }
+
     // --- boot ----------------------------------------------------------------
     (async function init() {
+      document.getElementById("year").textContent = new Date().getFullYear();
       try {
-        const cfg = await (await fetch("/api/config")).json();
+        const res = await fetch("/api/config");
+        if (res.status === 401) { window.location = "/login"; return; }
+        const cfg = await res.json();
         if (!cfg.configured) {
           els.loc.textContent = "Not configured";
           setStatus(cfg.error || "App is not configured.", true);
@@ -269,6 +302,7 @@
         }
         els.loc.textContent = cfg.location || "Selected location";
         els.store.textContent = cfg.store || "";
+        if (cfg.sessionTimeoutMinutes > 0) startIdleTimer(cfg.sessionTimeoutMinutes);
       } catch {
         els.loc.textContent = "Selected location";
       }
