@@ -18,8 +18,8 @@ const API_VERSION = process.env.SHOPIFY_API_VERSION || "2025-01";
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 // Idle timeout in minutes before the session expires (only used with APP_PASSWORD).
 const SESSION_MINUTES = (() => {
-  const n = parseInt(process.env.SESSION_TIMEOUT_MINUTES || "5", 10);
-  return Number.isFinite(n) && n > 0 ? n : 5;
+  const n = parseInt(process.env.SESSION_TIMEOUT_MINUTES || "3", 10);
+  return Number.isFinite(n) && n > 0 ? n : 3;
 })();
 
 // Normalize "mystore", "mystore.myshopify.com" or a full URL into a hostname.
@@ -91,9 +91,12 @@ function loginPage(showError) {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Sign in — Stock Search</title>
+<link rel="icon" href="/favicon.ico" />
 <style>
-  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#eef0f4;
+  body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:24px;background:#eef0f4;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#14181f}
+  .logo{height:64px;width:auto;max-width:70vw;object-fit:contain}
   form{background:#fff;padding:28px 24px;border-radius:16px;box-shadow:0 8px 24px rgba(20,24,31,.08);
     width:min(340px,90vw)}
   h1{font-size:18px;margin:0 0 4px}
@@ -104,14 +107,18 @@ function loginPage(showError) {
   button{width:100%;border:0;background:#1b4db1;color:#fff;font-size:16px;font-weight:600;
     padding:13px;border-radius:11px;cursor:pointer}
   .err{color:#b42318;font-size:13px;margin:-4px 0 12px}
+  .foot{color:#5b6472;font-size:12px}
 </style></head><body>
+<img class="logo" src="/logo.png" alt="Mavi" onerror="this.style.display='none'" />
 <form method="POST" action="/login">
   <h1>Warehouse Stock Search</h1>
   <p>Enter the access password to continue.</p>
   ${showError ? '<div class="err">Incorrect password. Try again.</div>' : ""}
   <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password" />
   <button type="submit">Sign in</button>
-</form></body></html>`;
+</form>
+<footer class="foot">© ${new Date().getFullYear()} Mavi · Internal use only</footer>
+</body></html>`;
 }
 
 if (APP_PASSWORD) {
@@ -124,7 +131,7 @@ if (APP_PASSWORD) {
   app.post("/login", (req, res) => {
     if ((req.body.password || "") === APP_PASSWORD) {
       setSessionCookie(req, res);
-      return res.redirect("/");
+      return res.redirect("/?k=1"); // marks a fresh login so a later refresh signs out
     }
     return res.redirect("/login?error=1");
   });
