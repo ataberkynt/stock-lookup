@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Warehouse Stock Search</title>
+  <style>
+    :root {
+      --bg: #eef0f4;
+      --surface: #ffffff;
+      --ink: #14181f;
+      --muted: #5b6472;
+      --line: #dfe3ea;
+      --brand: #1b4db1;
+      --brand-ink: #0f2f6e;
+      --in: #157347;
+      --low: #b4690e;
+      --none: #b42318;
+      --radius: 14px;
+      --shadow: 0 1px 2px rgba(20, 24, 31, .06), 0 8px 24px rgba(20, 24, 31, .06);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.4;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 64px; }
+
+    /* Location banner — always visible so it's clear which stock is shown */
+    .banner {
+      position: sticky; top: 0; z-index: 5;
+      margin: -16px -16px 16px;
+      padding: 14px 16px calc(14px + env(safe-area-inset-top));
+      background: var(--brand);
+      color: #fff;
+    }
+    .banner .eyebrow {
+      font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+      opacity: .8; margin-bottom: 2px;
+    }
+    .banner .loc { font-size: 18px; font-weight: 700; }
+    .banner .store { font-size: 12px; opacity: .75; margin-top: 2px; }
+
+    h1 { font-size: 20px; margin: 4px 0 14px; font-weight: 700; }
+
+    .toggle {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+      background: #e2e6ee; padding: 4px; border-radius: 12px; margin-bottom: 10px;
+    }
+    .toggle button {
+      appearance: none; border: 0; background: transparent; cursor: pointer;
+      padding: 10px; border-radius: 9px; font-size: 15px; font-weight: 600; color: var(--muted);
+    }
+    .toggle button[aria-pressed="true"] {
+      background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+    }
+
+    .searchbar { display: flex; gap: 8px; }
+    .searchbar input {
+      flex: 1; min-width: 0; font-size: 17px; padding: 14px 14px;
+      border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+      color: var(--ink);
+    }
+    .searchbar input:focus { outline: 2px solid var(--brand); outline-offset: 0; border-color: transparent; }
+    .searchbar button {
+      appearance: none; border: 0; cursor: pointer; background: var(--brand); color: #fff;
+      font-size: 16px; font-weight: 600; padding: 0 20px; border-radius: 12px;
+    }
+    .searchbar button:disabled { opacity: .55; cursor: default; }
+
+    .hint { color: var(--muted); font-size: 13px; margin: 8px 2px 0; }
+
+    #status { margin-top: 20px; color: var(--muted); font-size: 15px; }
+    #status.error { color: var(--none); }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      box-shadow: var(--shadow); margin-top: 14px; overflow: hidden;
+    }
+    .card-head { display: flex; gap: 12px; align-items: center; padding: 14px; border-bottom: 1px solid var(--line); }
+    .thumb { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: #eef0f4; flex: none; }
+    .thumb.placeholder { display: grid; place-items: center; color: var(--muted); font-size: 11px; }
+    .card-title { font-weight: 700; font-size: 16px; }
+
+    .rows { list-style: none; margin: 0; padding: 0; }
+    .row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 12px 14px; border-top: 1px solid var(--line);
+    }
+    .row:first-child { border-top: 0; }
+    .size { font-weight: 600; font-size: 15px; }
+    .meta { color: var(--muted); font-size: 12px; margin-top: 2px; word-break: break-all; }
+
+    .qty { display: flex; align-items: baseline; gap: 6px; flex: none; }
+    .qty .num { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .qty .unit { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .qty.in .num { color: var(--in); }
+    .qty.low .num { color: var(--low); }
+    .qty.none .num { color: var(--none); }
+    .qty.na .num { color: var(--muted); font-size: 15px; font-weight: 700; }
+
+    /* Single-variant (barcode) result gets a bigger, focused readout */
+    .focus .qty .num { font-size: 40px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="banner">
+      <div class="eyebrow">Showing stock for</div>
+      <div class="loc" id="locName">Loading…</div>
+      <div class="store" id="storeName"></div>
+    </div>
+
+    <h1>Warehouse Stock Search</h1>
+
+    <div class="toggle" role="group" aria-label="Search type">
+      <button id="modeName" aria-pressed="true">Product name</button>
+      <button id="modeBarcode" aria-pressed="false">Barcode</button>
+    </div>
+
+    <div class="searchbar">
+      <input id="q" type="search" inputmode="search" autocomplete="off"
+             placeholder="Search by product name" enterkeyhint="search" />
+      <button id="go">Search</button>
+    </div>
+    <p class="hint" id="hint">Type a product name and press Search to see each size's warehouse stock.</p>
+
+    <div id="status"></div>
+    <div id="results"></div>
+  </div>
+
+  <script>
+    const els = {
+      loc: document.getElementById("locName"),
+      store: document.getElementById("storeName"),
+      modeName: document.getElementById("modeName"),
+      modeBarcode: document.getElementById("modeBarcode"),
+      q: document.getElementById("q"),
+      go: document.getElementById("go"),
+      hint: document.getElementById("hint"),
+      status: document.getElementById("status"),
+      results: document.getElementById("results"),
+    };
+
+    let mode = "name"; // "name" | "barcode"
+
+    function setMode(next) {
+      mode = next;
+      const isName = mode === "name";
+      els.modeName.setAttribute("aria-pressed", String(isName));
+      els.modeBarcode.setAttribute("aria-pressed", String(!isName));
+      els.q.placeholder = isName ? "Search by product name" : "Scan or type a barcode";
+      els.q.inputMode = isName ? "search" : "numeric";
+      els.hint.textContent = isName
+        ? "Type a product name and press Search to see each size's warehouse stock."
+        : "Scan or type a barcode to jump straight to that item's warehouse stock.";
+      els.q.focus();
+    }
+
+    els.modeName.addEventListener("click", () => setMode("name"));
+    els.modeBarcode.addEventListener("click", () => setMode("barcode"));
+
+    // --- rendering helpers ---------------------------------------------------
+    function qtyClass(available) {
+      if (available === null || available === undefined) return "na";
+      if (available <= 0) return "none";
+      if (available <= 2) return "low";
+      return "in";
+    }
+    function qtyMarkup(available, focus) {
+      const cls = qtyClass(available);
+      const num = available === null || available === undefined ? "—" : available;
+      const unit = cls === "na" ? "not stocked" : "available";
+      return `<div class="qty ${cls}${focus ? " focus" : ""}">
+        <span class="num">${num}</span><span class="unit">${unit}</span>
+      </div>`;
+    }
+    function thumb(url, title) {
+      if (url) return `<img class="thumb" src="${url}" alt="${title || ""}" loading="lazy" />`;
+      return `<div class="thumb placeholder">No image</div>`;
+    }
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    function renderProducts(products) {
+      if (!products.length) return setStatus("No products found. Check spelling or try a barcode.");
+      setStatus("");
+      els.results.innerHTML = products.map((p) => {
+        const rows = p.variants.map((v) => {
+          const size = esc(v.title === "Default Title" ? p.title : v.title);
+          const meta = [v.sku && "SKU " + esc(v.sku), v.barcode && esc(v.barcode)].filter(Boolean).join("  ·  ");
+          return `<li class="row">
+            <div><div class="size">${size}</div>${meta ? `<div class="meta">${meta}</div>` : ""}</div>
+            ${qtyMarkup(v.available, false)}
+          </li>`;
+        }).join("");
+        return `<div class="card">
+          <div class="card-head">${thumb(p.image, p.title)}<div class="card-title">${esc(p.title)}</div></div>
+          <ul class="rows">${rows}</ul>
+        </div>`;
+      }).join("");
+    }
+
+    function renderVariants(variants) {
+      if (!variants.length) return setStatus("No item found for that barcode.");
+      setStatus("");
+      els.results.innerHTML = variants.map((v) => {
+        const title = esc(v.productTitle);
+        const size = esc(v.title === "Default Title" ? "" : v.title);
+        const meta = [v.sku && "SKU " + esc(v.sku), v.barcode && esc(v.barcode)].filter(Boolean).join("  ·  ");
+        return `<div class="card">
+          <div class="card-head">${thumb(v.image, title)}
+            <div><div class="card-title">${title}</div>${size ? `<div class="meta">${size}</div>` : ""}</div>
+          </div>
+          <ul class="rows"><li class="row">
+            <div>${meta ? `<div class="meta">${meta}</div>` : `<div class="size">Warehouse stock</div>`}</div>
+            ${qtyMarkup(v.available, true)}
+          </li></ul>
+        </div>`;
+      }).join("");
+    }
+
+    function setStatus(msg, isError) {
+      els.results.innerHTML = "";
+      els.status.textContent = msg || "";
+      els.status.className = isError ? "error" : "";
+    }
+
+    // --- search --------------------------------------------------------------
+    async function search() {
+      const term = els.q.value.trim();
+      if (!term) { els.q.focus(); return; }
+      els.go.disabled = true;
+      setStatus("Searching…");
+      try {
+        const endpoint = mode === "name"
+          ? `/api/search?q=${encodeURIComponent(term)}`
+          : `/api/barcode?code=${encodeURIComponent(term)}`;
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        if (!res.ok) { setStatus(data.error || "Something went wrong.", true); return; }
+        if (mode === "name") renderProducts(data.products || []);
+        else renderVariants(data.variants || []);
+      } catch (e) {
+        setStatus("Network error. Check your connection and try again.", true);
+      } finally {
+        els.go.disabled = false;
+      }
+    }
+
+    els.go.addEventListener("click", search);
+    els.q.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+
+    // --- boot ----------------------------------------------------------------
+    (async function init() {
+      try {
+        const cfg = await (await fetch("/api/config")).json();
+        if (!cfg.configured) {
+          els.loc.textContent = "Not configured";
+          setStatus(cfg.error || "App is not configured.", true);
+          els.go.disabled = true;
+          return;
+        }
+        els.loc.textContent = cfg.location || "Selected location";
+        els.store.textContent = cfg.store || "";
+      } catch {
+        els.loc.textContent = "Selected location";
+      }
+      setMode("name");
+    })();
+  </script>
+</body>
+</html>
